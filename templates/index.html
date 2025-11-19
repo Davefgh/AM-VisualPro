@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automata Visualizer Pro</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <div id="toast" class="toast">Notification</div>
+
+    <nav class="navbar">
+        <div class="brand">⚡ Automata Pro</div>
+        <div class="nav-actions">
+            <button onclick="app.clearAll()">Clear Canvas</button>
+            <button onclick="document.getElementById('importFile').click()">Import</button>
+            <button class="primary" onclick="app.exportDFA()">Export JSON</button>
+            <input type="file" id="importFile" style="display:none" accept=".json" onchange="app.importDFA(event)">
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="floating-tools">
+            <button class="tool-btn active" onclick="app.setMode('addState', this)" data-tooltip="Add State (Click)">
+                ⚪
+            </button>
+            <button class="tool-btn" onclick="app.setMode('addTransition', this)" data-tooltip="Add Transition (Drag)">
+                ↗️
+            </button>
+            <button class="tool-btn" onclick="app.setMode('setStart', this)" data-tooltip="Set Start State">
+                🏁
+            </button>
+            <button class="tool-btn" onclick="app.setMode('toggleFinal', this)" data-tooltip="Toggle Final State">
+                ◎
+            </button>
+            <hr style="border: 0; border-top: 1px solid var(--border); width: 100%;">
+            <button class="tool-btn" onclick="app.deleteSelected()" data-tooltip="Delete Selected" style="color: #ef4444;">
+                🗑️
+            </button>
+        </div>
+
+        <div class="canvas-wrapper">
+            <canvas id="canvas"></canvas>
+            
+            <div id="simControls" class="sim-controls hidden">
+                <div id="simDisplay" class="sim-display"></div>
+                <button class="sim-btn" onclick="app.stepSimulation(-1)">◀</button>
+                <button class="sim-btn play" onclick="app.autoSimulation()">▶</button>
+                <button class="sim-btn" onclick="app.stepSimulation(1)">▶|</button>
+                <button class="sim-btn stop" onclick="app.stopSimulation()">◼</button>
+                <div id="simStatus" style="font-size: 0.8rem; font-weight: 600; margin-left: 10px; color: var(--text-light)"></div>
+            </div>
+
+            <div class="legend">
+                <span class="legend-dot" style="background: var(--primary)"></span> Normal
+                <span style="margin: 0 8px"></span>
+                <span class="legend-dot" style="background: var(--success)"></span> Start
+                <span style="margin: 0 8px"></span>
+                <span class="legend-dot" style="background: var(--accent)"></span> Active
+            </div>
+        </div>
+
+        <div class="config-panel">
+            <div class="panel-section">
+                <h3>DFA Configuration</h3>
+                <div class="input-group">
+                    <label>Alphabet (Σ)</label>
+                    <input type="text" id="alphabetInput" value="0,1" placeholder="e.g., a,b">
+                </div>
+                <button class="full-btn" onclick="app.updateAlphabet()">Update Alphabet</button>
+            </div>
+
+            <div class="panel-section">
+                <h3>Debugger</h3>
+                <div class="input-group">
+                    <label>Input String</label>
+                    <input type="text" id="simulateInput" placeholder="e.g., 0110">
+                </div>
+                <button class="full-btn primary" onclick="app.startSimulation()">Load & Debug</button>
+            </div>
+
+            <div class="panel-section">
+                <h3>Test Suite</h3>
+                <div class="input-group">
+                    <label>Batch Strings (One per line)</label>
+                    <textarea id="testInput" rows="5" placeholder="01&#10;110"></textarea>
+                </div>
+                <button class="full-btn" onclick="app.runBatchTests()">Run Suite</button>
+                <div id="testResults" style="margin-top:10px; font-size: 0.85rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dfa.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/renderer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
