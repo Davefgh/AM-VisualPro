@@ -149,6 +149,8 @@ class App {
             this.dfa.deleteState(this.dfa.selectedState);
             this.showToast('State deleted');
             this.renderer.draw();
+        } else {
+            this.showToast('No state selected. Click a state first!', true);
         }
     }
 
@@ -390,5 +392,12 @@ class App {
     }
 }
 
-// Initialize app when DOM is loaded
-const app = new App();
+// Initialize app when DOM is loaded - FIXED: Made global
+// Wait for all resources to load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        window.app = new App();
+    });
+} else {
+    window.app = new App();
+}

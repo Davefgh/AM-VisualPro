@@ -64,9 +64,9 @@ class Renderer {
             this.ctx.fillStyle = '#fff';
             this.ctx.fill();
             
-            // Stroke with appropriate color
+            // Stroke with appropriate color (black and gray theme)
             this.ctx.lineWidth = isSelected ? 3 : 2;
-            this.ctx.strokeStyle = isCurrent ? '#ec4899' : (isStart ? '#10b981' : '#6366f1');
+            this.ctx.strokeStyle = isCurrent ? '#000000' : (isStart ? '#404040' : '#1a1a1a');
             this.ctx.stroke();
 
             // Reset shadow

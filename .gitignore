@@ -27,24 +27,36 @@ wheels/
 instance/
 .webassets-cache
 
-# IDEs
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Project specific
-saved_dfas/*.json
-!saved_dfas/.gitkeep
+# Saved DFAs (user data - don't commit)
+saved_dfas/
+*.json
 
 # Environment variables
 .env
-.flaskenv
+.env.local
 
 # Logs
 *.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+Thumbs.db
+.DS_Store
