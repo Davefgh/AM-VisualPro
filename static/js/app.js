@@ -13,6 +13,27 @@ class App {
 
         this.setupInput();
         this.setupMouse();
+        this.setupToolButtons();
+    }
+
+    /**
+     * Setup tool button event listeners
+     */
+    setupToolButtons() {
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = btn.dataset.action;
+                const mode = btn.dataset.mode;
+                
+                if (action === 'delete') {
+                    this.deleteSelected();
+                } else if (mode) {
+                    this.setMode(mode, btn);
+                }
+            });
+        });
+        
+        console.log('✅ Tool buttons initialized');
     }
 
     /**
@@ -36,19 +57,41 @@ class App {
         const getPos = (e) => {
             const rect = this.canvas.getBoundingClientRect();
             return { 
-                x: e.clientX - rect.left, 
-                y: e.clientY - rect.top 
+                x: (e.clientX - rect.left) * this.renderer.dpr, 
+                y: (e.clientY - rect.top) * this.renderer.dpr
             };
         };
 
         // Mouse down event
         this.canvas.addEventListener('mousedown', (e) => {
             const pos = getPos(e);
-            const state = this.renderer.getStateAt(pos.x, pos.y);
+            // Adjust for DPI when checking collision
+            const checkPos = { x: pos.x / this.renderer.dpr, y: pos.y / this.renderer.dpr };
+            
+            // We need to check against state coordinates which are in logical pixels
+            // But the renderer handles scaling. Let's keep logic simple:
+            // The state coordinates are logical. The mouse event gives client coordinates.
+            // We should use client coordinates relative to canvas for logic if we want 1:1 mapping with drawing
+            // BUT, the renderer scales the context. 
+            // Let's stick to logical coordinates for state positions.
+            
+            const logicalPos = {
+                x: e.offsetX,
+                y: e.offsetY
+            };
+            
+            const state = this.renderer.getStateAt(logicalPos.x, logicalPos.y);
 
-            // Add new state if clicking empty space in addState mode
+            // Add new state ONLY if clicking empty space in addState mode
             if (this.mode === 'addState' && !state) {
-                this.dfa.addState(pos.x, pos.y);
+                this.dfa.addState(logicalPos.x, logicalPos.y);
+                this.renderer.draw();
+                return;
+            }
+
+            // Prevent any action if clicking empty space in non-addState modes
+            if (!state && this.mode !== 'addState') {
+                this.dfa.selectedState = null; // Deselect
                 this.renderer.draw();
                 return;
             }
@@ -64,17 +107,19 @@ class App {
                 } 
                 else if (this.mode === 'addTransition') {
                     // Start creating transition
-                    this.dfa.tempTransition = { from: state, to: pos };
+                    this.dfa.tempTransition = { from: state, to: logicalPos };
                 } 
                 else if (this.mode === 'setStart') {
                     // Set as start state
                     this.dfa.startState = state;
-                    this.showToast('Start state updated');
+                    this.showToast(`Start state set to: ${state.id}`);
                     this.renderer.draw();
                 } 
                 else if (this.mode === 'toggleFinal') {
                     // Toggle final state
                     state.isFinal = !state.isFinal;
+                    const status = state.isFinal ? 'final' : 'non-final';
+                    this.showToast(`${state.id} is now ${status}`);
                     this.renderer.draw();
                 }
             }
@@ -82,39 +127,57 @@ class App {
 
         // Mouse move event
         this.canvas.addEventListener('mousemove', (e) => {
-            const pos = getPos(e);
+            const logicalPos = {
+                x: e.offsetX,
+                y: e.offsetY
+            };
             
             // Drag state
             if (isDragging && draggedState) {
-                draggedState.x = pos.x;
-                draggedState.y = pos.y;
+                draggedState.x = logicalPos.x;
+                draggedState.y = logicalPos.y;
                 this.renderer.draw();
             } 
             // Update temporary transition line
             else if (this.dfa.tempTransition) {
-                this.dfa.tempTransition.to = pos;
+                this.dfa.tempTransition.to = logicalPos;
                 this.renderer.draw();
             }
         });
 
         // Mouse up event
         this.canvas.addEventListener('mouseup', (e) => {
-            const pos = getPos(e);
-            const state = this.renderer.getStateAt(pos.x, pos.y);
+            const logicalPos = {
+                x: e.offsetX,
+                y: e.offsetY
+            };
+            const state = this.renderer.getStateAt(logicalPos.x, logicalPos.y);
 
             // Complete transition if ending on a state
             if (this.dfa.tempTransition && state) {
                 const symbol = prompt(`Transition on input (${this.dfa.alphabet.join(',')}):`);
                 
-                if (symbol && this.dfa.alphabet.includes(symbol)) {
-                    this.dfa.addTransition(
-                        this.dfa.tempTransition.from, 
-                        state, 
-                        symbol
-                    );
-                    this.showToast(`Added transition: ${this.dfa.tempTransition.from.id} → ${state.id} on '${symbol}'`);
-                } else if (symbol) {
-                    this.showToast('Invalid symbol! Must be in alphabet.', true);
+                if (symbol) {
+                    // Split by comma to allow multiple symbols at once
+                    const symbols = symbol.split(',').map(s => s.trim()).filter(s => s);
+                    let added = 0;
+                    
+                    symbols.forEach(s => {
+                        if (this.dfa.alphabet.includes(s)) {
+                            this.dfa.addTransition(
+                                this.dfa.tempTransition.from, 
+                                state, 
+                                s
+                            );
+                            added++;
+                        }
+                    });
+                    
+                    if (added > 0) {
+                        this.showToast(`Added ${added} transition(s)`);
+                    } else {
+                        this.showToast('Invalid symbol(s)! Must be in alphabet.', true);
+                    }
                 }
             }
 
@@ -138,6 +201,27 @@ class App {
         });
         if (btnElement) {
             btnElement.classList.add('active');
+        }
+
+        // Change cursor based on mode
+        const cursors = {
+            'addState': 'crosshair',
+            'addTransition': 'pointer',
+            'setStart': 'pointer',
+            'toggleFinal': 'pointer'
+        };
+        this.canvas.style.cursor = cursors[mode] || 'default';
+
+        // Show toast to inform user of mode change
+        const modeNames = {
+            'addState': 'Add State - Click to create',
+            'addTransition': 'Add Transition - Drag between states',
+            'setStart': 'Set Start - Click a state',
+            'toggleFinal': 'Toggle Final - Click a state'
+        };
+        
+        if (modeNames[mode]) {
+            this.showToast(modeNames[mode], false);
         }
     }
 
@@ -256,7 +340,7 @@ class App {
         
         status.innerHTML = accepted 
             ? '<span style="color:var(--success)">✓ ACCEPTED</span>' 
-            : '<span style="color:#ef4444">✗ REJECTED</span>';
+            : '<span style="color:var(--error)">✗ REJECTED</span>';
         
         this.showToast(
             accepted ? 'String accepted!' : 'String rejected!',
@@ -280,7 +364,7 @@ class App {
         }
         
         if (this.simIndex === this.simString.length) {
-            html += ' <span style="font-size:12px">END</span>';
+            html += ' <span style="font-size:12px; color:var(--text-muted)">END</span>';
         }
         
         display.innerHTML = html;
@@ -319,16 +403,75 @@ class App {
             }
             
             const accepted = valid && curr.isFinal;
-            const color = accepted ? 'var(--success)' : '#ef4444';
+            const color = accepted ? 'var(--success)' : 'var(--error)';
             const text = accepted ? 'PASS' : 'FAIL';
             
             resultsDiv.innerHTML += `
-                <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-family:monospace; background:#f1f5f9; padding:6px 10px; border-radius:4px; border-left: 3px solid ${color};">
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-family:monospace; background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:4px; border-left: 3px solid ${color}; color: var(--text-main)">
                     <span>${str}</span>
                     <span style="color:${color}; font-weight:bold">${text}</span>
                 </div>
             `;
         });
+    }
+
+    // ==================== MINIMIZATION ====================
+
+    /**
+     * Minimize DFA using backend
+     */
+    minimizeDFA() {
+        const dfaData = this.dfa.toJSON();
+        
+        fetch('/api/minimize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(dfaData)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                this.showToast(data.error, true);
+                return;
+            }
+            
+            this.showMinimizationSteps(data.steps);
+        })
+        .catch(err => {
+            console.error(err);
+            this.showToast('Error minimizing DFA', true);
+        });
+    }
+
+    /**
+     * Show minimization steps in modal
+     */
+    showMinimizationSteps(steps) {
+        const modal = document.getElementById('minModalOverlay');
+        const body = document.getElementById('minStepsBody');
+        body.innerHTML = '';
+        
+        steps.forEach((step, index) => {
+            const partitionsHtml = step.partitions.map(p => 
+                `{${p.join(', ')}}`
+            ).join(' | ');
+            
+            body.innerHTML += `
+                <div class="step-card">
+                    <div class="step-title">${step.description}</div>
+                    <div class="partition-display">${partitionsHtml}</div>
+                </div>
+            `;
+        });
+        
+        modal.classList.add('open');
+    }
+
+    /**
+     * Close minimization modal
+     */
+    closeMinModal() {
+        document.getElementById('minModalOverlay').classList.remove('open');
     }
 
     // ==================== IMPORT/EXPORT ====================
@@ -375,6 +518,41 @@ class App {
         reader.readAsText(file);
     }
 
+    /**
+     * Import JFLAP file
+     */
+    importJFLAP(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const xmlContent = e.target.result;
+            
+            fetch('/api/import-jflap', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ xml: xmlContent })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    this.dfa.fromJSON(data.dfa);
+                    document.getElementById('alphabetInput').value = this.dfa.alphabet.join(',');
+                    this.renderer.draw();
+                    this.showToast('JFLAP file imported successfully');
+                } else {
+                    this.showToast(data.error, true);
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                this.showToast('Error importing JFLAP file', true);
+            });
+        };
+        reader.readAsText(file);
+    }
+
     // ==================== UTILITIES ====================
 
     /**
@@ -383,7 +561,11 @@ class App {
     showToast(msg, isError = false) {
         const t = document.getElementById('toast');
         t.innerText = msg;
-        t.style.backgroundColor = isError ? '#ef4444' : '#1e293b';
+        if (isError) {
+            t.classList.add('error');
+        } else {
+            t.classList.remove('error');
+        }
         t.classList.add('show');
         
         setTimeout(() => {
@@ -392,12 +574,12 @@ class App {
     }
 }
 
-// Initialize app when DOM is loaded - FIXED: Made global
-// Wait for all resources to load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    try {
         window.app = new App();
-    });
-} else {
-    window.app = new App();
-}
+        console.log('✅ Automata Pro initialized successfully');
+    } catch (error) {
+        console.error('❌ Failed to initialize Automata Pro:', error);
+    }
+});

@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, send_file
 import json
 import os
 from datetime import datetime
+import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
 
@@ -90,44 +91,218 @@ class DFAValidator:
                 'error': result.get('reason', None)
             })
         return results
+
+    @staticmethod
+    def parse_jflap(xml_content):
+        """Parse JFLAP .jff XML content to DFA JSON format"""
+        try:
+            root = ET.fromstring(xml_content)
+            
+            # Basic validation
+            type_elem = root.find('type')
+            if type_elem is None or type_elem.text != 'fa':
+                return None, "Not a Finite Automaton file"
+            
+            automaton = root.find('automaton')
+            if automaton is None:
+                return None, "No automaton definition found"
+            
+            states = []
+            transitions = []
+            alphabet = set()
+            
+            # Parse states
+            for state_elem in automaton.findall('state'):
+                state_id = state_elem.get('id')
+                name = state_elem.get('name')
+                x = float(state_elem.find('x').text) if state_elem.find('x') is not None else 100.0
+                y = float(state_elem.find('y').text) if state_elem.find('y') is not None else 100.0
+                is_initial = state_elem.find('initial') is not None
+                is_final = state_elem.find('final') is not None
+                
+                states.append({
+                    'id': f"q{state_id}", # Normalize IDs
+                    'name': name,
+                    'x': x,
+                    'y': y,
+                    'isStart': is_initial,
+                    'isFinal': is_final
+                })
+            
+            # Parse transitions
+            for trans_elem in automaton.findall('transition'):
+                from_id = f"q{trans_elem.find('from').text}"
+                to_id = f"q{trans_elem.find('to').text}"
+                read_elem = trans_elem.find('read')
+                symbol = read_elem.text if read_elem is not None and read_elem.text else ""
+                
+                if symbol:
+                    alphabet.add(symbol)
+                    transitions.append({
+                        'from': f"q{from_id}",
+                        'to': f"q{to_id}",
+                        'symbol': symbol
+                    })
+            
+            return {
+                'states': states,
+                'transitions': transitions,
+                'alphabet': sorted(list(alphabet))
+            }, "Success"
+            
+        except Exception as e:
+            return None, f"Error parsing JFLAP file: {str(e)}"
     
     @staticmethod
     def minimize_dfa(dfa_data):
-        """DFA minimization using Myhill-Nerode theorem"""
-        # This is a simplified version - full implementation would be more complex
+        """
+        DFA minimization using Hopcroft's algorithm (Partition Refinement).
+        Returns detailed steps for visualization.
+        """
         states = dfa_data['states']
         transitions = dfa_data['transitions']
+        alphabet = dfa_data['alphabet']
         
-        # Partition states into final and non-final
-        final_states = set(s['id'] for s in states if s.get('isFinal', False))
-        non_final_states = set(s['id'] for s in states if not s.get('isFinal', False))
+        # 1. Remove unreachable states (BFS)
+        start_state = next((s for s in states if s.get('isStart')), None)
+        if not start_state:
+            return {'error': 'No start state'}
+            
+        reachable = {start_state['id']}
+        queue = [start_state['id']]
         
-        partitions = [final_states, non_final_states]
+        # Build adjacency list for faster traversal
+        adj = {s['id']: {} for s in states}
+        for t in transitions:
+            if t['from'] not in adj: adj[t['from']] = {}
+            adj[t['from']][t['symbol']] = t['to']
+            
+        while queue:
+            curr = queue.pop(0)
+            for symbol in alphabet:
+                if curr in adj and symbol in adj[curr]:
+                    next_state = adj[curr][symbol]
+                    if next_state not in reachable:
+                        reachable.add(next_state)
+                        queue.append(next_state)
         
-        # Iteratively refine partitions (simplified)
+        # Filter states
+        active_states = [s for s in states if s['id'] in reachable]
+        
+        # 2. Initialize Partitions (Final vs Non-Final)
+        final_states = set(s['id'] for s in active_states if s.get('isFinal', False))
+        non_final_states = set(s['id'] for s in active_states if not s.get('isFinal', False))
+        
+        partitions = []
+        if final_states: partitions.append(final_states)
+        if non_final_states: partitions.append(non_final_states)
+        
+        steps = []
+        steps.append({
+            'description': 'Initial Partition (Final vs Non-Final)',
+            'partitions': [list(p) for p in partitions]
+        })
+        
+        # 3. Refine Partitions
         changed = True
-        iterations = 0
-        while changed and iterations < 10:
+        iteration = 0
+        
+        while changed:
             changed = False
             new_partitions = []
             
-            for partition in partitions:
-                if len(partition) <= 1:
-                    new_partitions.append(partition)
+            for group in partitions:
+                if len(group) <= 1:
+                    new_partitions.append(group)
                     continue
                 
-                # Try to split partition
-                # (This is a simplified version)
-                new_partitions.append(partition)
+                # Try to split this group
+                groups_by_signature = {}
+                
+                for state_id in group:
+                    signature = []
+                    for symbol in alphabet:
+                        target = adj.get(state_id, {}).get(symbol)
+                        target_partition_idx = -1
+                        if target:
+                            for idx, p in enumerate(partitions):
+                                if target in p:
+                                    target_partition_idx = idx
+                                    break
+                        signature.append(target_partition_idx)
+                    
+                    sig_tuple = tuple(signature)
+                    if sig_tuple not in groups_by_signature:
+                        groups_by_signature[sig_tuple] = set()
+                    groups_by_signature[sig_tuple].add(state_id)
+                
+                # Add all split groups to new partitions
+                for sub_group in groups_by_signature.values():
+                    new_partitions.append(sub_group)
+                    
+                if len(groups_by_signature) > 1:
+                    changed = True
             
             partitions = new_partitions
-            iterations += 1
+            iteration += 1
+            if changed:
+                steps.append({
+                    'description': f'Iteration {iteration}: Refined partitions',
+                    'partitions': [list(p) for p in partitions]
+                })
         
+        # 4. Construct Minimized DFA
+        minimized_states = []
+        minimized_transitions = []
+        
+        # Map old state ID -> new partition ID
+        state_to_partition = {}
+        for idx, p in enumerate(partitions):
+            p_id = f"P{idx}"
+            
+            # Determine position (average of all states in partition)
+            avg_x = sum(next(s['x'] for s in active_states if s['id'] == sid) for sid in p) / len(p)
+            avg_y = sum(next(s['y'] for s in active_states if s['id'] == sid) for sid in p) / len(p)
+            
+            minimized_states.append({
+                'id': p_id,
+                'label': "{" + ",".join(p) + "}",
+                'x': avg_x,
+                'y': avg_y,
+                'isStart': any(next(s['isStart'] for s in active_states if s['id'] == sid) for sid in p),
+                'isFinal': any(next(s['isFinal'] for s in active_states if s['id'] == sid) for sid in p)
+            })
+            
+            for sid in p:
+                state_to_partition[sid] = p_id
+                
+        # Build transitions
+        added_transitions = set()
+        for p_idx, p in enumerate(partitions):
+            p_id = f"P{p_idx}"
+            rep_id = next(iter(p)) # Take one representative
+            
+            for symbol in alphabet:
+                target = adj.get(rep_id, {}).get(symbol)
+                if target and target in state_to_partition:
+                    target_p_id = state_to_partition[target]
+                    
+                    trans_key = (p_id, target_p_id, symbol)
+                    if trans_key not in added_transitions:
+                        minimized_transitions.append({
+                            'from': p_id,
+                            'to': target_p_id,
+                            'symbol': symbol
+                        })
+                        added_transitions.add(trans_key)
+
         return {
-            'original_states': len(states),
-            'minimized_states': len(partitions),
-            'partitions': [list(p) for p in partitions],
-            'iterations': iterations
+            'steps': steps,
+            'minimized_dfa': {
+                'states': minimized_states,
+                'transitions': minimized_transitions,
+                'alphabet': alphabet
+            }
         }
 
 @app.route('/')
@@ -171,6 +346,19 @@ def minimize():
     dfa_data = request.json
     result = DFAValidator.minimize_dfa(dfa_data)
     return jsonify(result)
+
+@app.route('/api/import-jflap', methods=['POST'])
+def import_jflap():
+    """Import JFLAP file content"""
+    data = request.json
+    xml_content = data.get('xml', '')
+    
+    dfa_data, error = DFAValidator.parse_jflap(xml_content)
+    
+    if dfa_data:
+        return jsonify({'success': True, 'dfa': dfa_data})
+    else:
+        return jsonify({'success': False, 'error': error})
 
 @app.route('/api/save', methods=['POST'])
 def save_dfa():
